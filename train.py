@@ -64,7 +64,6 @@ script_dir = os.path.dirname(__file__)  # 获取脚本所在的目录
 class STN3d(nn.Module):
     def __init__(self, channel):
         super(STN3d, self).__init__()
-        self.conv1 = torch.nn.Conv1d(channel, 64, 1)
         # self.conv1 = torch.nn.Conv1d(channel, 64, 1)
         self.conv1 = torch.nn.Conv1d(channel, 32, 1)
         # self.conv2 = torch.nn.Conv1d(64, 128, 1)
@@ -114,7 +113,7 @@ class STN3d(nn.Module):
 
 
 class STNkd(nn.Module):
-    def __init__(self, k=16):
+    def __init__(self, k=32):
         super(STNkd, self).__init__()
         # self.conv1 = torch.nn.Conv1d(k, 64, 1)
         self.conv1 = torch.nn.Conv1d(k, 32, 1)
@@ -170,22 +169,22 @@ class PointNetEncoder(nn.Module):
         super(PointNetEncoder, self).__init__()
         self.stn = STN3d(channel)
         # self.conv1 = torch.nn.Conv1d(channel, 64, 1)
-        self.conv1 = torch.nn.Conv1d(channel, 32, 1)
+        self.conv1 = torch.nn.Conv1d(channel, 16, 1)
         # self.conv2 = torch.nn.Conv1d(64, 128, 1)
-        self.conv2 = torch.nn.Conv1d(32, 64, 1)
+        self.conv2 = torch.nn.Conv1d(16, 32, 1)
         # self.conv3 = torch.nn.Conv1d(128, 1024, 1)
-        self.conv3 = torch.nn.Conv1d(64, 128, 1)
+        self.conv3 = torch.nn.Conv1d(32, 64, 1)
         # self.bn1 = nn.BatchNorm1d(64)
-        self.bn1 = nn.BatchNorm1d(32)
+        self.bn1 = nn.BatchNorm1d(16)
         # self.bn2 = nn.BatchNorm1d(128)
-        self.bn2 = nn.BatchNorm1d(64)
+        self.bn2 = nn.BatchNorm1d(32)
         # self.bn3 = nn.BatchNorm1d(1024)
-        self.bn3 = nn.BatchNorm1d(128)
+        self.bn3 = nn.BatchNorm1d(64)
         self.global_feat = global_feat
         self.feature_transform = feature_transform
         if self.feature_transform:
             # self.fstn = STNkd(k=64)
-            self.fstn = STNkd(k=32)
+            self.fstn = STNkd(k=16)
 
     def forward(self, x):
         B, D, N = x.size()
@@ -213,12 +212,12 @@ class PointNetEncoder(nn.Module):
         x = self.bn3(self.conv3(x))
         x = torch.max(x, 2, keepdim=True)[0]
         # x = x.view(-1, 1024)
-        x = x.view(-1, 128)
+        x = x.view(-1, 64)
         if self.global_feat:
             return x, trans, trans_feat
         else:
             # x = x.view(-1, 1024, 1).repeat(1, 1, N)
-            x = x.view(-1, 128, 1).repeat(1, 1, N)
+            x = x.view(-1, 64, 1).repeat(1, 1, N)
             return torch.cat([x, pointfeat], 1), trans, trans_feat
 
 
@@ -241,16 +240,16 @@ class get_model(nn.Module):
             channel = 3
         self.feat = PointNetEncoder(global_feat=True, feature_transform=True, channel=channel)
         # self.fc1 = nn.Linear(1024, 512)
-        self.fc1 = nn.Linear(128, 64)
+        self.fc1 = nn.Linear(64, 32)
         # self.fc2 = nn.Linear(512, 256)
-        self.fc2 = nn.Linear(64, 32)
+        self.fc2 = nn.Linear(32, 16)
         # self.fc3 = nn.Linear(256, k)
-        self.fc3 = nn.Linear(32, k)
+        self.fc3 = nn.Linear(16, k)
         # self.dropout = nn.Dropout(p=0.4)
         # self.bn1 = nn.BatchNorm1d(512)
-        self.bn1 = nn.BatchNorm1d(64)
+        self.bn1 = nn.BatchNorm1d(32)
         # self.bn2 = nn.BatchNorm1d(256)
-        self.bn2 = nn.BatchNorm1d(32)
+        self.bn2 = nn.BatchNorm1d(16)
         self.relu = nn.ReLU()
 
     def forward(self, x):
@@ -315,8 +314,8 @@ class PointCloudDataset(Dataset):
         new_list_of_points = [] 
         for points in self.list_of_points:
             length = len(points)
-            sample_indexs = np.linspace(0, length - 1, num=num_points, dtype=int)
-            new_list_of_points.append(np.array([points[i] for i in sample_indexs]))
+            sample_indices = np.linspace(0, length - 1, num=num_points, dtype=int)
+            new_list_of_points.append(np.array([points[i] for i in sample_indices]))
         self.list_of_points = new_list_of_points
 
 
@@ -483,13 +482,70 @@ def main():
                 best_instance_acc = instance_acc
                 best_epoch = epoch + 1
                 # torch.save(classifier.state_dict(), 'best_model.pth')
-                save_model_params_and_buffers_to_txt(classifier, "./params")
+                # save_model_params_and_buffers_to_txt(classifier, "./params")
 
             print('Test Instance Accuracy: %f' % (instance_acc))
             print('Best Instance Accuracy: %f' % (best_instance_acc))
 
     print("finish TRANING")
     # save_model_params_and_buffers_to_txt(classifier, script_dir)
+    save_model_params_and_buffers_to_txt(classifier, "./params")
+
+def load_model_params_and_buffers_from_txt(model, directory):
+    # 加载所有参数
+    for name, param in model.named_parameters():
+        param_path = os.path.join(directory, f'{name}.txt')
+        if os.path.exists(param_path):
+            # 加载并重塑为参数原始形状
+            loaded_param = np.loadtxt(param_path).reshape(param.shape)
+            param.data.copy_(torch.tensor(loaded_param, dtype=param.dtype))
+        else:
+            print(f"Warning: Parameter file '{param_path}' not found.")
+
+    for name, buffer in model.named_buffers():
+        print(name)
+        buffer_path = os.path.join(directory, f'{name}.txt')
+        if os.path.exists(buffer_path):
+            # 加载并重塑为缓冲区原始形状
+            loaded_buffer = np.loadtxt(buffer_path).reshape(buffer.shape)
+            buffer.data.copy_(torch.tensor(loaded_buffer, dtype=buffer.dtype))
+        else:
+            print(f"Warning: Buffer file '{buffer_path}' not found.")
+
+def inference():
+    data_path = './data'
+
+    test_dataset = PointCloudDataset(root=data_path, split='test')
+
+    test_dataloader = DataLoader(test_dataset, batch_size=1000, shuffle=False, num_workers=10, drop_last=False)
+
+    print("finish DATA LOADING")
+
+    '''MODEL LOADING'''
+
+    classifier = get_model(num_class)
+    load_model_params_and_buffers_from_txt(classifier, "./params")
+    classifier = classifier.cuda()
+
+    print("finish MODEL LOADING")
+
+    classifier = classifier.eval()
+
+    # for batch_id, (points, target) in tqdm(enumerate(train_dataloader, 0), total=len(train_dataloader), smoothing=0.9): #显示进度条
+    for batch_id, (points, target) in enumerate(test_dataloader):
+
+        points = points.transpose(2, 1)
+        points, target = points.cuda(), target.cuda()
+
+        pred, trans_feat = classifier(points)
+        pred_choice = pred.data.max(1)[1]
+
+        correct = pred_choice.eq(target.long().data).cpu().sum()
+        accuracy_rate = correct / len(target)
+        print(pred_choice)
+        print(correct)
+        print(accuracy_rate)
 
 if __name__ == '__main__':
-    main()
+    # main()
+    inference()
