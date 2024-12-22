@@ -31,76 +31,6 @@ def load_model_params_and_buffers_from_txt(model, directory, keystr):
         else:
             print(f"Warning: Buffer file '{buffer_path}' not found.")
 
-
-# def get_cuda_autotune_config():
-#     return [
-#         triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 8}, num_stages=3,
-#                       num_warps=8),
-#         triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=4,
-#                       num_warps=4),
-#         triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=4,
-#                       num_warps=4),
-#         triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 64, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=4,
-#                       num_warps=4),
-#         triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=4,
-#                       num_warps=4),
-#         triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=4,
-#                       num_warps=4),
-#         triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=5,
-#                       num_warps=2),
-#         triton.Config({'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_N': 64, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=5,
-#                       num_warps=2),
-#     ]
-
-# @triton.autotune(
-#     configs=get_cuda_autotune_config(),
-#     key=['M', 'N', 'K']
-# )
-# @triton.jit 
-# def matmul_kernel(
-#     a_ptr, b_ptr, c_ptr, 
-#     M, N, K, 
-#     stride_am, stride_ak,
-#     stride_bk, stride_bn,
-#     stride_cm, stride_cn,
-#     BLOCK_SIZE_M: tl.constexpr, BLOCK_SIZE_N: tl.constexpr, BLOCK_SIZE_K: tl.constexpr, 
-#     GROUP_SIZE_M: tl.constexpr,
-# ):
-#     # 每个program计算C的一个BLOCK: [BLOCK_SIZE_M, BLOCK_SIZE_N]
-#     pid = tl.program_id(axis=0)
-#     num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
-#     num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
-#     num_pid_in_group = GROUP_SIZE_M * num_pid_n # 
-#     group_id = pid // num_pid_in_group 
-#     first_pid_m = group_id * GROUP_SIZE_M #
-#     group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M) #
-#     pid_m = first_pid_m + ((pid % num_pid_in_group) % group_size_m)
-#     pid_n = (pid % num_pid_in_group) // group_size_m
-
-#     offs_am = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % M 
-#     offs_bn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)) % N 
-#     offs_k = tl.arange(0, BLOCK_SIZE_K)
-#     a_ptrs = a_ptr + offs_am[:, None] * stride_am + offs_k[None, :] * stride_ak 
-#     b_ptrs = b_ptr + offs_k[:, None] * stride_bk + offs_bn[None, :] * stride_bn 
-
-#     accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
-#     for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):
-#         a = tl.load(a_ptrs, mask=offs_k[None, :] < K - k * BLOCK_SIZE_K, other=0.0)
-#         b = tl.load(b_ptrs, mask=offs_k[:, None] < K - k * BLOCK_SIZE_K, other=0.0)
-
-#         accumulator = tl.dot(a, b, accumulator)
-
-#         a_ptrs += BLOCK_SIZE_K * stride_ak 
-#         b_ptrs += BLOCK_SIZE_K * stride_bk 
-
-#     c = accumulator.to(tl.float16)
-
-#     offs_cm = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
-#     offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
-#     c_ptrs = c_ptr + stride_cm * offs_cm[:, None] + stride_cn * offs_cn[None, :]
-#     c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
-#     tl.store(c_ptrs, c, mask=c_mask)
-
 def get_cuda_autotune_config():
     return [
         triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 8}, num_stages=3,
@@ -172,33 +102,6 @@ def matmul_kernel(
     c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
     tl.store(c_ptrs, c, mask=c_mask)
 
-
-
-# @triton.jit 
-# def leaky_relu(x):
-#     return tl.where(x >= 0, x, 0.01 * x)
-
-# @triton.jit 
-# def add_kernel(
-#     a_ptr, b_ptr, c_ptr,
-#     M, N, 
-#     BLOCK_SIZE_M: tl.constexpr, BLOCK_SIZE_N: tl.constexpr
-# ):
-#     # 每个program处理c的BLOCK_SIZE_M行。保证BLOCK_SIZE_N >= N
-#     pid = tl.program_id(axis=0)
-    
-#     offsets_m = pid * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
-#     offsets_n = tl.arange(0, BLOCK_SIZE_N)
-#     a_ptrs = a_ptr + offsets_m[:, None] * N + offsets_n[None, :]
-#     b_ptrs = b_ptr + offsets_n 
-    
-#     a = tl.load(a_ptrs, mask=(offsets_m < M)[:, None] & (offsets_n < N))
-#     b = tl.load(b_ptrs, mask=offsets_n < N)[None, :]
-#     c = a + b 
-
-#     c_ptrs = c_ptr + offsets_m[:, None] * N + offsets_n[None, :]
-#     tl.store(c_ptrs, c, mask=(offsets_m < M)[:, None] & (offsets_n < N))    
-
 @triton.jit 
 def add_kernel(
     a_ptr, b_ptr, c_ptr,
@@ -221,38 +124,35 @@ def add_kernel(
     tl.store(c_ptrs, c, mask=(offsets_m < M)[:, None] & (offsets_n < N))    
 
 
-
-@triton.jit 
+@triton.jit
 def batchnorm_kernel(
-    x_ptr, m_ptr, v_ptr, w_ptr, b_ptr, y_ptr,
-    M, N,
-    BLOCK_SIZE_M: tl.constexpr, BLOCK_SIZE_N: tl.constexpr 
+    x_ptr, y_ptr, 
+    mean_ptr, var_ptr, weight_ptr, bias_ptr, 
+    B, C, L,
+    stride_b, stride_c, stride_l,
+    eps: tl.constexpr,
+    BLOCK_SIZE: tl.constexpr     
 ):
-    # 每个program处理一个[BLOCK_SIZE_M, BLOCK_SIZE_N]的块
-    pid_m = tl.program_id(axis=0)
-    pid_n = tl.program_id(axis=1)
-
-    offsets_m = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
-    offsets_n = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
-
-    x_ptrs = x_ptr + offsets_m[:, None] * N + offsets_n[None, :] 
-    m_ptrs = m_ptr + offsets_n
-    v_ptrs = v_ptr + offsets_n
-    w_ptrs = w_ptr + offsets_n 
-    b_ptrs = b_ptr + offsets_n
-    y_ptrs = y_ptr + offsets_m[:, None] * N + offsets_n[None, :] 
-
-    x = tl.load(x_ptrs, mask=(offsets_m < M)[:, None] & (offsets_n < N))
-    m = tl.load(m_ptrs, mask=offsets_n < N)
-    v = tl.load(v_ptrs, mask=offsets_n < N)
-    w = tl.load(w_ptrs, mask=offsets_n < N)
-    b = tl.load(b_ptrs, mask=offsets_n < N)
-
-    eps = 1e-5
-    norm = (x - m[None, :]) / tl.sqrt(v + eps)
-    y = norm * w + b 
+    cid = tl.program_id(axis=0)
     
-    tl.store(y_ptrs, y, mask=(offsets_m < M)[:, None] & (offsets_n < N))
+    mean = tl.load(mean_ptr + cid, mask=cid < C).to(tl.float32)
+    var = tl.load(var_ptr + cid, mask=cid < C).to(tl.float32)
+    weight = tl.load(weight_ptr + cid, mask=cid < C).to(tl.float32)
+    bias = tl.load(bias_ptr + cid, mask=cid < C).to(tl.float32)
+
+    std_inv = 1.0 / tl.sqrt(var + eps)
+
+    offsets = tl.arange(0, BLOCK_SIZE)
+    for b in range(B):
+        start_idx = b * stride_b + cid * stride_c + offsets * stride_l 
+        mask = offsets < L 
+        
+        x = tl.load(x_ptr + start_idx, mask=mask, other=0.0).to(tl.float32)
+        x_norm = (x - mean) * std_inv 
+        y = weight * x_norm + bias 
+        
+        y.to(tl.float16)
+        tl.store(y_ptr + start_idx, y, mask=mask)
 
     
 @triton.autotune(
@@ -369,80 +269,50 @@ def linear(x, w, b):
     )
     return y
 
-# def conv1d(x, w, b):
-#     assert x.shape[1] == w.shape[1], "Incompatible dimensions"
-#     dout, din = w.shape
-#     bs, din, d = x.shape 
-
-#     x = x.transpose(2, 1).reshape(-1, din)
-#     w = w.transpose(0, 1)
-#     x_w = torch.empty((bs * d, dout), dtype=torch.float16, device=x.device)
-#     grid = lambda meta: (triton.cdiv(bs * d, meta["BLOCK_SIZE_M"]) * triton.cdiv(dout, meta["BLOCK_SIZE_N"]),)
-#     matmul_kernel[grid](
-#         x, w, x_w, 
-#         bs * d, dout, din, 
-#         x.stride(0), x.stride(1),
-#         w.stride(0), w.stride(1),
-#         x_w.stride(0), x_w.stride(1)
-#     )
-
-#     y = torch.empty_like(x_w)
-#     grid = lambda meta: (triton.cdiv(bs * d, meta["BLOCK_SIZE_M"]),)
-#     add_kernel[grid](
-#         x_w, b, y, 
-#         bs * d, dout, 
-#         BLOCK_SIZE_M=32, BLOCK_SIZE_N=triton.next_power_of_2(dout)
-#     )
-#     y = y.view(bs, d, -1).transpose(2, 1)
-#     return y 
 def conv1d(x, w, b):
-    assert x.shape[1] == w.shape[1], "Incompatible dimensions"
-    dout, din = w.shape
-    bs, din, d = x.shape 
+    # [B, Cin, L] -> [Cout, Cin] -> [Cout] -> [B, Cout, L]
+    assert x.shape[1] == w.shape[1], "Mismatch"
+    assert w.shape[0] == b.shape[0], "Mismatch"
+    B, Cin, L = x.shape 
+    Cout, Cin = w.shape 
 
-    x = x.transpose(2, 1).reshape(-1, din)
-    w = w.transpose(0, 1)
-    x_w = torch.empty((bs * d, dout), dtype=torch.float16, device=x.device)
-    grid = lambda meta: (triton.cdiv(bs * d, meta["BLOCK_SIZE_M"]) * triton.cdiv(dout, meta["BLOCK_SIZE_N"]),)
-    matmul_kernel[grid](
-        x, w, x_w, 
-        bs * d, dout, din, 
-        x.stride(0), x.stride(1),
-        w.stride(0), w.stride(1),
-        x_w.stride(0), x_w.stride(1)
-    )
-
-    y = torch.empty_like(x_w)
-    grid = lambda meta: (triton.cdiv(bs * d, meta["BLOCK_SIZE_M"]),)
-    add_kernel[grid](
-        x_w, b, y, 
-        bs * d, dout, 
-        BLOCK_SIZE_M=32, BLOCK_SIZE_N=triton.next_power_of_2(dout)
-    )
-    y = y.view(bs, d, -1).transpose(2, 1)
+    y = torch.empty((B, Cout, L), dtype=torch.float16, device=x.device)
+    for bid in range(B):
+        tmp = torch.empty((Cout, L), dtype=torch.float16, device=x.device)
+        grid = lambda meta: (triton.cdiv(Cout, meta["BLOCK_SIZE_M"]) * triton.cdiv(L, meta["BLOCK_SIZE_N"]), )
+        matmul_kernel[grid](
+            w, x[bid], tmp,
+            Cout, L, Cin,
+            w.stride(0), w.stride(1),
+            x[bid].stride(0), x[bid].stride(1),
+            tmp.stride(0), tmp.stride(1),
+        )
+        y[bid] = tmp + b
     return y 
- 
-def batchnorm1d(x, m, v, w, b, relu=True):
+
+def batchnorm1d(x, mean, var, weight, bias, relu=True):
+    assert x.shape[1] == mean.shape[0] == var.shape[0] == weight.shape[0] == bias.shape[0], "Mismatch"
+    x.contiguous()
     if len(x.shape) == 3:
-        C = x.shape[1]
-        nx = x.transpose(2, 1).reshape(-1, C)
-    else: 
-        nx = x 
-    assert nx.is_contiguous(), "Matrix x must be contiguous"
-    M, N = nx.shape 
+        B, C, L = x.shape 
+    elif len(x.shape) == 2:
+        B, C = x.shape 
+        L = 1
 
     y = torch.empty_like(x)
-    grid = lambda meta: (triton.cdiv(M, meta["BLOCK_SIZE_M"]), triton.cdiv(N, meta["BLOCK_SIZE_N"]) )
+    grid = (C, )
     batchnorm_kernel[grid](
-        nx, m, v, w, b, y, 
-        M, N, 
-        BLOCK_SIZE_M=32, BLOCK_SIZE_N=32
+        x, y, 
+        mean, var, weight, bias, 
+        B, C, L, 
+        x.stride(0), x.stride(1), 1,
+        eps=1e-5, BLOCK_SIZE=triton.next_power_of_2(L)
     )
-    if len(x.shape) == 3:
-        y = y.reshape(x.shape[0], x.shape[2], -1).transpose(2, 1)
-    if relu:
-        y = y * (y > 0)
+    
+    if relu: 
+        y = torch.maximum(y, torch.tensor(0.0, device=x.device))
     return y 
+
 
 def bmm(a, b):
     assert a.shape[0] == b.shape[0], "Batchsize Mismatch"
@@ -523,33 +393,14 @@ class STNkd(nn.Module):
         self.conv1 = Conv1d(k, 32, params=params, keystr=keystr + ".conv1")
         self.conv2 = Conv1d(32, 64, params=params, keystr=keystr + ".conv2")
         self.conv3 = Conv1d(64, 128, params=params, keystr=keystr + ".conv3")
-        # self.conv1 = nn.Conv1d(k, 32, 1).half()
-        # self.conv2 = nn.Conv1d(32, 64, 1).half()
-        # self.conv3 = nn.Conv1d(64, 128, 1).half()
-        # load_model_params_and_buffers_from_txt(self.conv1, "./params", keystr + ".conv1.")
-        # load_model_params_and_buffers_from_txt(self.conv2, "./params", keystr + ".conv2.")
-        # load_model_params_and_buffers_from_txt(self.conv3, "./params", keystr + ".conv3.")
-        # self.conv1.cuda()
-        # self.conv2.cuda()
-        # self.conv3.cuda()
 
         self.fc1 = Linear(128, 64, params=params, keystr=keystr + ".fc1")
         self.fc2 = Linear(64, 32, params=params, keystr=keystr + ".fc2")
         self.fc3 = Linear(32, k * k, params=params, keystr=keystr + ".fc3")
 
-        # self.bn1 = BatchNorm1d(32, params=params, keystr=keystr + ".bn1")
-        # self.bn2 = BatchNorm1d(64, params=params, keystr=keystr + ".bn2")
-        # self.bn3 = BatchNorm1d(128, params=params, keystr=keystr + ".bn3")
-        self.bn1 = nn.BatchNorm1d(32).half()
-        self.bn2 = nn.BatchNorm1d(64).half()
-        self.bn3 = nn.BatchNorm1d(128).half()
-        load_model_params_and_buffers_from_txt(self.bn1, "./params", keystr + ".bn1.")
-        load_model_params_and_buffers_from_txt(self.bn2, "./params", keystr + ".bn2.")
-        load_model_params_and_buffers_from_txt(self.bn3, "./params", keystr + ".bn3.")
-        self.bn1.cuda()
-        self.bn2.cuda()
-        self.bn3.cuda()
-
+        self.bn1 = BatchNorm1d(32, params=params, keystr=keystr + ".bn1")
+        self.bn2 = BatchNorm1d(64, params=params, keystr=keystr + ".bn2")
+        self.bn3 = BatchNorm1d(128, params=params, keystr=keystr + ".bn3")
         self.bn4 = BatchNorm1d(64, params=params, keystr=keystr + ".bn4")
         self.bn5 = BatchNorm1d(32, params=params, keystr=keystr + ".bn5")
 
@@ -557,17 +408,9 @@ class STNkd(nn.Module):
 
     def forward(self, x):
         batchsize = x.shape[0]
-        x = F.relu(self.bn1(self.conv1(x)))
-        x = F.relu(self.bn2(self.conv2(x)))
-        x = F.relu(self.bn3(self.conv3(x)))
-
-        # **************************************
-        # !!! 重要 !!! 
-        # batchnorm 对于 [B, C, L] 的实现有问题，需要修改
-
-        # diff = x1 - x2 
-        # print(diff)
-
+        x = self.bn1(self.conv1(x))
+        x = self.bn2(self.conv2(x))
+        x = self.bn3(self.conv3(x))
         x = torch.max(x, 2, keepdim=True)[0]
         x = x.view(-1, 128)
         x = self.bn4(self.fc1(x))
@@ -587,29 +430,9 @@ class PointNetEncoder(nn.Module):
         self.conv1 = Conv1d(channel, 16, params=params, keystr=keystr + ".conv1")
         self.conv2 = Conv1d(16, 32, params=params, keystr=keystr + ".conv2")
         self.conv3 = Conv1d(32, 64, params=params, keystr=keystr + ".conv3")
-        # self.conv1 = nn.Conv1d(channel, 16, 1).half()
-        # self.conv2 = nn.Conv1d(16, 32, 1).half()
-        # self.conv3 = nn.Conv1d(32, 64, 1).half()
-        # load_model_params_and_buffers_from_txt(self.conv1, "./params", keystr + ".conv1.")
-        # load_model_params_and_buffers_from_txt(self.conv2, "./params", keystr + ".conv2.")
-        # load_model_params_and_buffers_from_txt(self.conv3, "./params", keystr + ".conv3.")
-        # self.conv1.cuda()
-        # self.conv2.cuda()
-        # self.conv3.cuda()
-
-        # self.bn1 = BatchNorm1d(16, params=params, keystr=keystr + ".bn1")
-        # self.bn2 = BatchNorm1d(32, params=params, keystr=keystr + ".bn2")
-        # self.bn3 = BatchNorm1d(64, params=params, keystr=keystr + ".bn3")
-        self.bn1 = nn.BatchNorm1d(16).half()
-        self.bn2 = nn.BatchNorm1d(32).half()
-        self.bn3 = nn.BatchNorm1d(64).half()
-        load_model_params_and_buffers_from_txt(self.bn1, "./params", keystr + ".bn1.")
-        load_model_params_and_buffers_from_txt(self.bn2, "./params", keystr + ".bn2.")
-        load_model_params_and_buffers_from_txt(self.bn3, "./params", keystr + ".bn3.")
-        self.bn1.cuda()
-        self.bn2.cuda()
-        self.bn3.cuda()
-
+        self.bn1 = BatchNorm1d(16, params=params, keystr=keystr + ".bn1")
+        self.bn2 = BatchNorm1d(32, params=params, keystr=keystr + ".bn2")
+        self.bn3 = BatchNorm1d(64, params=params, keystr=keystr + ".bn3")
 
         self.global_feat = global_feat 
         self.feature_transform = feature_transform
@@ -622,16 +445,16 @@ class PointNetEncoder(nn.Module):
         x = bmm(x, trans)
         x = x.transpose(2, 1)
         
-        x = F.relu(self.bn1(self.conv1(x)))
+        x = self.bn1(self.conv1(x))
         
         trans_feat = self.fstn(x)
         x = x.transpose(2, 1)
         x = bmm(x, trans_feat)
         x = x.transpose(2, 1)
         
-        x = F.relu(self.bn2(self.conv2(x)))
-        # x = self.bn3(self.conv3(x), relu=False)
-        x = self.bn3(self.conv3(x))
+        x = self.bn2(self.conv2(x))
+        x = self.bn3(self.conv3(x), relu=False)
+
         x = torch.max(x, 2, keepdim=True)[0]
         x = x.view(-1, 64)
 
@@ -691,38 +514,9 @@ def read_h5_file(dataPath):
     return torch.tensor(np.array(list_of_points), dtype=torch.float16), torch.tensor(np.array(list_of_labels))
 
 
-def do_inference(list_of_points, list_of_labels, params): #请在本函数下使用triton实现推理操作
-    for i,points in enumerate(list_of_points):
-        # TODO ...在这里实现利用triton对点云数据进行深度学习的推理过程，当然，你也可以改进for循环以使用batch推理提速...
-                # 打印每一帧的数据，仅用于调试！
-    
-        # print(f"=========Points : {i}=========")
-        # # print(f"type {type(points)},shape {points.shape}")
-        # point_num = int(len(points) / 3)
-        # print(f"point_num={point_num}")
-        # for point_i in range(point_num):
-        #     print(f"x:{points[point_i*3+0]} y:{points[point_i*3+1]} z:{points[point_i*3+2]}")
-        print(f"Label: {list_of_labels[i]}")
-
-    # 示例triton程序
-    torch.manual_seed(0)
-    size = 98432
-    x = torch.rand(size, device='cuda')
-    y = torch.rand(size, device='cuda')
-    # output_triton = add(x, y)
-    # output_triton2 = add(x, y)
-    # output_triton3 = add(x, y)
-    # output_triton4 = add(x, y)
-
-    # print(output_triton)
-
-    accuracy_rate = 0.0001
-    return accuracy_rate
-
-
 def main():
-    # dir = os.path.dirname(__file__) # 保存模型参数文件(.txt)的文件夹路径
-    dir = "./params"
+    dir = os.path.dirname(__file__) # 保存模型参数文件(.txt)的文件夹路径
+    # dir = "./params"
 
     # 读取模型参数
     params = read_params(dir)
@@ -742,29 +536,19 @@ def main():
     model = PointNet(k=num_class, params=params)
     model.eval()
 
-    print(points.shape)
+    points = points.transpose(2, 1)
+    model(points)
+
     # 开始计时
     start = time.time()
-    # accuracy_rate = do_inference(list_of_points, list_of_labels, params)
-    points = points.transpose(2, 1)
     pred, _ = model(points)
+    pred_choice = pred.data.max(1)[1]
+    correct = pred_choice.eq(labels).cpu().sum()
+    accuracy_rate = correct / len(labels)
 
     # 结束计时
     end = time.time()
     ms = end - start
-
-    print(pred.shape)
-
-    pred_choice = pred.data.max(1)[1]
-
-    print(pred_choice)
-
-    correct = pred_choice.eq(labels).cpu().sum()
-    accuracy_rate = correct / len(labels)
-
-    print(accuracy_rate)
-
-    exit()
 
     # 输出结果，请严格保持此输出格式，并把0.0001替换成实际的准确率，请不要输出除了此结果之外的任何内容！！！
     print(f"{ms:.4f}:{accuracy_rate:.4f}")

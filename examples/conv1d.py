@@ -103,33 +103,54 @@ def add_kernel(
     tl.store(c_ptrs, c, mask=(offsets_m < M)[:, None] & (offsets_n < N))    
 
 
+# def conv1d(x, w, b):
+#     assert x.shape[1] == w.shape[1], "Incompatible dimensions"
+#     dout, din = w.shape
+#     bs, din, d = x.shape 
+
+#     x = x.transpose(2, 1).reshape(-1, din)
+#     w = w.transpose(0, 1)
+#     x_w = torch.empty((bs * d, dout), dtype=torch.float16, device=x.device)
+#     grid = lambda meta: (triton.cdiv(bs * d, meta["BLOCK_SIZE_M"]) * triton.cdiv(dout, meta["BLOCK_SIZE_N"]),)
+#     matmul_kernel[grid](
+#         x, w, x_w, 
+#         bs * d, dout, din, 
+#         x.stride(0), x.stride(1),
+#         w.stride(0), w.stride(1),
+#         x_w.stride(0), x_w.stride(1)
+#     )
+
+#     y = torch.empty_like(x_w)
+#     grid = lambda meta: (triton.cdiv(bs * d, meta["BLOCK_SIZE_M"]),)
+#     add_kernel[grid](
+#         x_w, b, y, 
+#         bs * d, dout, 
+#         BLOCK_SIZE_M=32, BLOCK_SIZE_N=triton.next_power_of_2(dout)
+#     )
+#     y = y.view(bs, d, -1).transpose(2, 1)
+#     return y 
+
 def conv1d(x, w, b):
-    assert x.shape[1] == w.shape[1], "Incompatible dimensions"
-    dout, din = w.shape
-    bs, din, d = x.shape 
+    # [B, Cin, L] -> [Cout, Cin] -> [Cout] -> [B, Cout, L]
+    assert x.shape[1] == w.shape[1], "Mismatch"
+    assert w.shape[0] == b.shape[0], "Mismatch"
+    B, Cin, L = x.shape 
+    Cout, Cin = w.shape 
 
-    x = x.transpose(2, 1).reshape(-1, din)
-    w = w.transpose(0, 1)
-    x_w = torch.empty((bs * d, dout), dtype=torch.float16, device=x.device)
-    grid = lambda meta: (triton.cdiv(bs * d, meta["BLOCK_SIZE_M"]) * triton.cdiv(dout, meta["BLOCK_SIZE_N"]),)
-    matmul_kernel[grid](
-        x, w, x_w, 
-        bs * d, dout, din, 
-        x.stride(0), x.stride(1),
-        w.stride(0), w.stride(1),
-        x_w.stride(0), x_w.stride(1)
-    )
-
-    y = torch.empty_like(x_w)
-    grid = lambda meta: (triton.cdiv(bs * d, meta["BLOCK_SIZE_M"]),)
-    add_kernel[grid](
-        x_w, b, y, 
-        bs * d, dout, 
-        BLOCK_SIZE_M=32, BLOCK_SIZE_N=triton.next_power_of_2(dout)
-    )
-    y = y.view(bs, d, -1).transpose(2, 1)
+    y = torch.empty((B, Cout, L), dtype=torch.float16, device=x.device)
+    for bid in range(B):
+        tmp = torch.empty((Cout, L), dtype=torch.float16, device=x.device)
+        grid = lambda meta: (triton.cdiv(Cout, meta["BLOCK_SIZE_M"]) * triton.cdiv(L, meta["BLOCK_SIZE_N"]), )
+        matmul_kernel[grid](
+            w, x[bid], tmp,
+            Cout, L, Cin,
+            w.stride(0), w.stride(1),
+            x[bid].stride(0), x[bid].stride(1),
+            tmp.stride(0), tmp.stride(1),
+        )
+        y[bid] = tmp + b
     return y 
-    
+
 
 def load_model_params_and_buffers_from_txt(model, directory, keystr):
     # 加载所有参数

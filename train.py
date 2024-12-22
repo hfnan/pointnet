@@ -488,8 +488,8 @@ def main():
             print('Best Instance Accuracy: %f' % (best_instance_acc))
 
     print("finish TRANING")
-    # save_model_params_and_buffers_to_txt(classifier, script_dir)
-    save_model_params_and_buffers_to_txt(classifier, "./params")
+    save_model_params_and_buffers_to_txt(classifier, script_dir)
+    # save_model_params_and_buffers_to_txt(classifier, "./params")
 
 def load_model_params_and_buffers_from_txt(model, directory):
     # 加载所有参数
@@ -547,5 +547,5 @@ def inference():
         print(accuracy_rate)
 
 if __name__ == '__main__':
-    # main()
-    inference()
+    main()
+    # inference()
